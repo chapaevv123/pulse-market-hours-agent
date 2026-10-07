@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: pulse-market-hours-agent
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PULSE_DEMO_MODE
+        value: fixture
