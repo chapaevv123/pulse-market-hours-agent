@@ -10,8 +10,20 @@ from .config import Settings
 from .engine import evaluate, replay
 from .fixtures import scenario
 
-ROOT = Path(__file__).resolve().parents[2]
-WEB = ROOT / "web"
+
+def _resolve_web_root() -> Path:
+    configured = os.getenv("PULSE_WEB_ROOT")
+    candidates = ([Path(configured)] if configured else []) + [
+        Path.cwd() / "web",
+        Path(__file__).resolve().parents[2] / "web",
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate.resolve()
+    raise RuntimeError("Static web root not found; expected web/index.html")
+
+
+WEB = _resolve_web_root()
 SETTINGS = Settings.from_env()
 
 

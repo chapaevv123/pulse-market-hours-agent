@@ -1,4 +1,8 @@
+import json
+import urllib.request
 from dataclasses import replace
+from http.server import ThreadingHTTPServer
+from threading import Thread
 
 import pytest
 
@@ -7,6 +11,7 @@ from market_hours_agent.config import Settings
 from market_hours_agent.engine import POLICY_VERSION, evaluate, replay
 from market_hours_agent.fixtures import EXPECTED, scenario
 from market_hours_agent.models import Decision, EvidenceSnapshot
+from market_hours_agent.server import Handler
 
 
 @pytest.mark.parametrize(("name", "expected"), EXPECTED.items())
@@ -136,3 +141,38 @@ def test_hash_changes_when_source_evidence_changes():
     original = scenario("healthy")
     changed = replace(original, liquidity_usd=original.liquidity_usd + 1)
     assert evaluate(original).receipt_hash != evaluate(changed).receipt_hash
+
+
+def test_http_root_static_assets_and_apis():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urllib.request.urlopen(base + "/") as response:
+            assert response.status == 200
+            assert b"Pulse Market Hours Agent" in response.read()
+        with urllib.request.urlopen(base + "/styles.css") as response:
+            assert response.status == 200
+            assert response.headers.get_content_type() == "text/css"
+        with urllib.request.urlopen(base + "/api/health") as response:
+            health = json.load(response)
+            assert response.status == 200
+            assert health["mode"] == "fixture"
+            assert health["secrets_exposed"] is False
+        with urllib.request.urlopen(base + "/api/receipt?scenario=false_arbitrage") as response:
+            receipt = json.load(response)
+            assert response.status == 200
+            assert receipt["decision"] == "AVOID"
+        request = urllib.request.Request(
+            base + "/api/replay", data=json.dumps(receipt).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            replayed = json.load(response)
+            assert response.status == 200
+            assert replayed["verified"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
